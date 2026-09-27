@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Synapse Flashcards | Cloud Spaced Repetition</title>
+
+  <!-- iOS PWA Optimizations -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Synapse">
+  <meta name="theme-color" content="#090d16">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Supabase JS Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            },
+            surface: '#0f172a',
+            cardBg: '#1e293b',
+            borderClr: '#334155'
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    * {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    /* Support text selection inside cards and forms */
+    .selectable, input, textarea {
+      user-select: text;
+    }
+
+    /* 3D Flip Card Effect */
+    .perspective-1000 {
+      perspective: 1000px;
+    }
+    .transform-style-3d {
+      transform-style: preserve-3d;
+    }
+    .backface-hidden {
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+    }
+    .rotate-y-180 {
+      transform: rotateY(180deg);
+    }
+
+    /* Safe Area insets for iPhone dynamic island and bottom bar */
+    .safe-top {
+      padding-top: env(safe-area-inset-top, 16px);
+    }
+    .safe-bottom {
+      padding-bottom: env(safe-area-inset-bottom, 20px);
+    }
+
+    /* Custom subtle scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0b0f19;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #252e42;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3b4661;
+    }
+  </style>
+</head>
+
+<body class="bg-[#090d16] text-slate-100 h-full flex flex-col antialiased overflow-hidden">
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed top-6 right-1/2 translate-x-1/2 sm:translate-x-0 sm:right-6 z-50 flex flex-col gap-2 pointer-events-none w-11/12 max-w-sm"></div>
+
+  <!-- Header Section -->
+  <header class="safe-top bg-[#0e1424]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 shrink-0 z-20">
+    <div class="max-w-4xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <i data-lucide="brain-circuit" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+            Synapse
+            <span id="sync-badge" class="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              Local Mode
+            </span>
+          </h1>
+          <p id="review-subtitle" class="text-xs text-slate-400">Loading cards...</p>
+        </div>
+      </div>
+
+      <!-- Right Header Actions -->
+      <div class="flex items-center gap-2">
+        <button id="btn-sync" onclick="syncCardsWithDatabase(true)" title="Force sync" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800/60 transition active:scale-95">
+          <i data-lucide="refresh-cw" class="w-4 h-4" id="sync-icon"></i>
+        </button>
+        <button onclick="openConfigModal()" title="Database Settings" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800/60 transition active:scale-95">
+          <i data-lucide="database" class="w-4 h-4"></i>
+        </button>
+        <button onclick="openSqlModal()" title="View Setup SQL" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800/60 transition active:scale-95">
+          <i data-lucide="terminal" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 overflow-hidden relative max-w-4xl w-full mx-auto flex flex-col">
+    <!-- VIEW 1: STUDY / REVIEW VIEW -->
+    <section id="view-study" class="flex-1 flex flex-col p-4 overflow-y-auto">
+      <!-- Deck Progress bar & metrics -->
+      <div class="w-full flex items-center justify-between text-xs text-slate-400 font-medium mb-3">
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="due-count">0</span> Due
+          </span>
+          <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800/70 text-slate-300 border border-slate-700/50">
+            <span id="total-count">0</span> Total
+          </span>
+        </div>
+        <div id="deck-countdown" class="text-slate-400 text-xs truncate max-w-[180px] text-right">
+          Comparing to real-time...
+        </div>
+      </div>
+
+      <div id="card-stage" class="flex-1 flex flex-col justify-center items-center py-2 relative min-h-[340px]">
+        <!-- Empty / Complete State Container -->
+        <div id="caught-up-screen" class="hidden flex-col items-center justify-center text-center p-8 bg-[#121929] rounded-2xl border border-slate-800 max-w-md w-full shadow-2xl">
+          <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4">
+            <i data-lucide="check-check" class="w-7 h-7"></i>
+          </div>
+          <h2 class="text-lg font-bold text-white mb-1">Deck Completed!</h2>
+          <p id="caught-up-message" class="text-sm text-slate-400 mb-6">You have reviewed all cards currently due for spaced repetition.</p>
+          
+          <div class="w-full bg-[#0c1220] rounded-xl p-3.5 mb-6 text-left border border-slate-800/80">
+            <div class="text-[11px] text-slate-500 font-medium uppercase tracking-wider mb-1">Next Card Scheduled</div>
+            <div id="next-due-relative" class="text-sm text-indigo-300 font-semibold">Checking timeline...</div>
+            <div id="next-due-exact" class="text-xs text-slate-400 mt-0.5">--</div>
+          </div>
+
+          <div class="flex gap-2 w-full">
+            <button onclick="switchTab('cards')" class="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition active:scale-95">
+              Browse Deck
+            </button>
+            <button onclick="openCardModal()" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition active:scale-95 shadow-md shadow-indigo-600/25">
+              + New Card
+            </button>
+          </div>
+        </div>
+
+        <!-- 3D Interactive Card Element -->
+        <div id="flashcard-wrapper" class="w-full max-w-md h-full max-h-[460px] min-h-[320px] perspective-1000 cursor-pointer" onclick="toggleCardFlip()">
+          <div id="flashcard-inner" class="w-full h-full relative transform-style-3d transition-transform duration-500 shadow-2xl rounded-2xl">
+            
+            <!-- Front Face -->
+            <div class="absolute inset-0 backface-hidden w-full h-full rounded-2xl bg-gradient-to-b from-[#162035] to-[#111827] border border-slate-700/60 p-6 sm:p-8 flex flex-col justify-between shadow-lg">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="inline-flex items-center gap-1.5 uppercase font-semibold tracking-wider text-[11px] text-indigo-400">
+                  <i data-lucide="help-circle" class="w-3.5 h-3.5"></i> Front
+                </span>
+                <span id="card-meta-front" class="text-[11px] text-slate-400">Repetition 0</span>
+              </div>
+
+              <!-- Question / Prompt Body -->
+              <div class="flex-1 flex items-center justify-center text-center my-4 overflow-y-auto selectable px-2">
+                <p id="card-front-text" class="text-lg sm:text-xl font-medium text-slate-100 leading-relaxed whitespace-pre-wrap">Loading...</p>
+              </div>
+
+              <div class="flex items-center justify-center text-center text-slate-400 text-xs gap-1.5 pt-2 border-t border-slate-800">
+                <i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5"></i>
+                <span>Tap or press <kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-300 font-mono text-[10px]">Space</kbd> to reveal</span>
+              </div>
+            </div>
+
+            <!-- Back Face (Revealed Answer) -->
+            <div class="absolute inset-0 backface-hidden rotate-y-180 w-full h-full rounded-2xl bg-gradient-to-b from-[#18263e] to-[#0f172a] border border-indigo-500/40 p-6 sm:p-8 flex flex-col justify-between shadow-2xl">
+              <div class="flex items-center justify-between text-xs">
+                <span class="inline-flex items-center gap-1.5 uppercase font-semibold tracking-wider text-[11px] text-emerald-400">
+                  <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> Answer
+                </span>
+                <span id="card-meta-back" class="text-[11px] text-slate-400">Ease: 2.50</span>
+              </div>
+
+              <!-- Answer Content Body -->
+              <div class="flex-1 flex items-center justify-center text-center my-4 overflow-y-auto selectable px-2">
+                <p id="card-back-text" class="text-base sm:text-lg font-normal text-slate-100 leading-relaxed whitespace-pre-wrap"></p>
+              </div>
+
+              <div class="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
+                <span id="card-front-mini" class="truncate max-w-[200px] text-slate-400 italic"></span>
+                <span class="text-[10px] text-indigo-400">Rate memory retention ↓</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div id="controls-container" class="mt-3 shrink-0">
+        <!-- Pre-reveal Button -->
+        <button id="btn-reveal" onclick="toggleCardFlip()" class="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] text-white font-semibold rounded-xl text-sm transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2">
+          <i data-lucide="eye" class="w-4 h-4"></i>
+          Reveal Answer
+        </button>
+
+        <!-- Post-reveal SM-2 Grade Evaluation Buttons -->
+        <div id="rating-controls" class="hidden grid grid-cols-4 gap-2 sm:gap-3">
+          <!-- Button 1: Again -->
+          <button onclick="handleRateCard(1)" class="group flex flex-col items-center justify-center py-2.5 px-1 sm:px-2 rounded-xl bg-[#1e1c2a] hover:bg-rose-950/40 border border-rose-900/40 hover:border-rose-500/60 transition active:scale-95">
+            <span class="text-[11px] font-bold text-rose-400 flex items-center gap-1 mb-0.5">
+              <span class="hidden sm:inline opacity-60">1.</span> Again
+            </span>
+            <span class="text-[10px] text-slate-400">&lt; 10 min</span>
+          </button>
+
+          <!-- Button 2: Hard -->
+          <button onclick="handleRateCard(2)" class="group flex flex-col items-center justify-center py-2.5 px-1 sm:px-2 rounded-xl bg-[#221f20] hover:bg-amber-950/40 border border-amber-900/40 hover:border-amber-500/60 transition active:scale-95">
+            <span class="text-[11px] font-bold text-amber-400 flex items-center gap-1 mb-0.5">
+              <span class="hidden sm:inline opacity-60">2.</span> Hard
+            </span>
+            <span id="rate-hard-preview" class="text-[10px] text-slate-400">~1.2d</span>
+          </button>
+
+          <!-- Button 3: Good -->
+          <button onclick="handleRateCard(3)" class="group flex flex-col items-center justify-center py-2.5 px-1 sm:px-2 rounded-xl bg-[#142323] hover:bg-emerald-950/40 border border-emerald-900/40 hover:border-emerald-500/60 transition active:scale-95">
+            <span class="text-[11px] font-bold text-emerald-400 flex items-center gap-1 mb-0.5">
+              <span class="hidden sm:inline opacity-60">3.</span> Good
+            </span>
+            <span id="rate-good-preview" class="text-[10px] text-slate-400">~1-6d</span>
+          </button>
+
+          <!-- Button 4: Easy -->
+          <button onclick="handleRateCard(4)" class="group flex flex-col items-center justify-center py-2.5 px-1 sm:px-2 rounded-xl bg-[#15202e] hover:bg-sky-950/40 border border-sky-900/40 hover:border-sky-500/60 transition active:scale-95">
+            <span class="text-[11px] font-bold text-sky-400 flex items-center gap-1 mb-0.5">
+              <span class="hidden sm:inline opacity-60">4.</span> Easy
+            </span>
+            <span id="rate-easy-preview" class="text-[10px] text-slate-400">~4+d</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-cards" class="hidden flex-1 flex flex-col p-4 overflow-hidden">
+      <!-- Search & Deck Header -->
+      <div class="flex items-center gap-2 mb-3">
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+          <input type="text" id="card-search-input" oninput="filterCardsList()" placeholder="Search deck questions or answers..." class="w-full bg-[#121929] border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition selectable">
+        </div>
+        <button onclick="openCardModal()" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 shrink-0 shadow-md shadow-indigo-600/20">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          <span>Add Card</span>
+        </button>
+      </div>
+
+      <!-- Card List Table / Cards -->
+      <div class="flex-1 overflow-y-auto space-y-2.5 pr-1" id="cards-list-container">
+        <!-- Rendered dynamically -->
+      </div>
+    </section>
+  </main>
+
+  <nav class="safe-bottom bg-[#0c1220]/95 backdrop-blur-md border-t border-slate-800/80 px-4 py-2 shrink-0 z-20">
+    <div class="max-w-md mx-auto grid grid-cols-2 gap-2">
+      <button id="nav-btn-study" onclick="switchTab('study')" class="flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-xs transition bg-indigo-600/15 text-indigo-400 border border-indigo-500/30">
+        <i data-lucide="layers" class="w-4 h-4"></i>
+        <span>Review Queue</span>
+      </button>
+      <button id="nav-btn-cards" onclick="switchTab('cards')" class="flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-xs transition text-slate-400 hover:text-white hover:bg-slate-800/40">
+        <i data-lucide="library" class="w-4 h-4"></i>
+        <span>Deck Library</span>
+      </button>
+    </div>
+  </nav>
+
+  
+  <!-- MODAL 1: Add or Edit Card Modal -->
+  <div id="card-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-[#121929] border border-slate-800 rounded-2xl w-full max-w-lg p-5 sm:p-6 shadow-2xl flex flex-col gap-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 id="modal-card-title" class="font-bold text-white text-base">New Flashcard</h3>
+        <button onclick="closeCardModal()" class="text-slate-400 hover:text-white p-1 rounded-lg">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="form-card-id">
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Card Front (Prompt / Question)</label>
+          <textarea id="form-front" rows="3" placeholder="e.g. What is the difference between TCP and UDP?" class="w-full bg-[#0a0f1d] border border-slate-700 rounded-xl p-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition selectable"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Card Back (Answer / Solution)</label>
+          <textarea id="form-back" rows="4" placeholder="e.g. TCP is connection-oriented and reliable with packet guarantees; UDP is connectionless and prioritized for low latency." class="w-full bg-[#0a0f1d] border border-slate-700 rounded-xl p-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition selectable"></textarea>
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeCardModal()" class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition active:scale-95">Cancel</button>
+        <button onclick="saveCardFromModal()" class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition active:scale-95 shadow-md shadow-indigo-600/30">Save Card</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 2: Supabase Credentials Modal -->
+  <div id="config-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-[#121929] border border-slate-800 rounded-2xl w-full max-w-md p-5 sm:p-6 shadow-2xl flex flex-col gap-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="database" class="w-4 h-4 text-indigo-400"></i>
+          <h3 class="font-bold text-white text-base">Cloud Sync Settings</h3>
+        </div>
+        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-white p-1 rounded-lg">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-400 leading-relaxed">
+        Connect to your free <a href="https://supabase.com" target="_blank" class="text-indigo-400 underline">Supabase</a> project. Cards and real-time scheduling will sync seamlessly between your PC and iPhone.
+      </p>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Project URL</label>
+          <input type="text" id="supabase-url" placeholder="https://xyzcompany.supabase.co" class="w-full bg-[#0a0f1d] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 selectable">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Anon / Public Key</label>
+          <input type="password" id="supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6Ik..." class="w-full bg-[#0a0f1d] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 selectable">
+        </div>
+      </div>
+
+      <div class="bg-indigo-950/30 border border-indigo-800/40 rounded-xl p-3 text-[11px] text-indigo-300">
+        Leave empty to continue using <strong>Offline LocalStorage Mode</strong>. Your cards stay stored in this device's browser cache.
+      </div>
+
+      <div class="flex gap-2 pt-2 border-t border-slate-800">
+        <button onclick="disconnectSupabase()" class="px-3 py-2 bg-rose-950/40 border border-rose-800/40 hover:bg-rose-900/50 text-rose-300 rounded-xl text-xs font-semibold transition active:scale-95">Clear</button>
+        <button onclick="saveSupabaseConfig()" class="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition active:scale-95 shadow-md shadow-indigo-600/30">Connect & Sync</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: SQL Schema Snippet Modal -->
+  <div id="sql-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-[#121929] border border-slate-800 rounded-2xl w-full max-w-lg p-5 sm:p-6 shadow-2xl flex flex-col gap-4 max-h-[85vh]">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="terminal" class="w-4 h-4 text-emerald-400"></i>
+          <h3 class="font-bold text-white text-base">Supabase SQL Table Schema</h3>
+        </div>
+        <button onclick="closeSqlModal()" class="text-slate-400 hover:text-white p-1 rounded-lg">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-400">
+        Run this query inside your <strong>Supabase Dashboard &rarr; SQL Editor</strong> to initialize the cards database and row-level security:
+      </p>
+
+      <div class="relative flex-1 bg-[#070b14] border border-slate-800 rounded-xl p-3 overflow-hidden">
+        <pre id="sql-code" class="text-[11px] font-mono text-emerald-300 overflow-x-auto h-52 selectable leading-relaxed">
+-- 1. Create the flashcards table
+create table public.cards (
+  id uuid primary key default gen_random_uuid(),
+  front text not null,
+  back text not null,
+  interval_days float default 1.0,
+  ease_factor float default 2.5,
+  repetitions int default 0,
+  last_reviewed_at timestamptz default null,
+  next_review_at timestamptz default timezone('utc'::text, now()),
+  created_at timestamptz default timezone('utc'::text, now())
+);
+
+-- 2. Enable Row Level Security (RLS)
+alter table public.cards enable row level security;
+
+-- 3. Allow anonymous access (or bind to auth.uid() if using Supabase Auth)
+create policy "Allow all operations for anon" 
+on public.cards 
+for all 
+to anon 
+using (true) 
+with check (true);
+        </pre>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="copySqlSchema()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition active:scale-95">
+          <i data-lucide="copy" class="w-4 h-4"></i>
+          <span>Copy SQL to Clipboard</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State management
+    let supabaseClient = null;
+    let cards = [];
+    let currentDueIndex = 0;
+    let isFlipped = false;
+    let activeTab = 'study';
+
+    // Default starter cards for offline/demo usage
+    const DEFAULT_SEED_CARDS = [
+      {
+        id: "demo-card-1",
+        front: "What is the primary difference between Supervised and Unsupervised Learning?",
+        back: "Supervised learning uses labeled training datasets (input paired with ground truth target).\n\nUnsupervised learning finds hidden patterns, clusters, or distributions without target labels.",
+        interval_days: 1.0,
+        ease_factor: 2.5,
+        repetitions: 0,
+        last_reviewed_at: null,
+        next_review_at: new Date(Date.now() - 60000).toISOString() // Ready now
+      },
+      {
+        id: "demo-card-2",
+        front: "How does the SM-2 Spaced Repetition Algorithm calculate next review interval for 'Good'?",
+        back: "Repetition 1: 1 day\nRepetition 2: 6 days\nRepetition n: Interval(n-1) * Ease Factor (default 2.5)",
+        interval_days: 1.0,
+        ease_factor: 2.5,
+        repetitions: 0,
+        last_reviewed_at: null,
+        next_review_at: new Date(Date.now() - 30000).toISOString() // Ready now
+      },
+      {
+        id: "demo-card-3",
+        front: "Why is PWA (Progressive Web App) ideal for cross-platform iOS and PC synchronization?",
+        back: "PWAs run the same codebase across all devices, can be added to the iPhone Home Screen without App Store fees, and sync seamlessly against a single REST/PostgreSQL backend.",
+        interval_days: 1.0,
+        ease_factor: 2.5,
+        repetitions: 0,
+        last_reviewed_at: null,
+        next_review_at: new Date(Date.now() - 10000).toISOString() // Ready now
+      }
+    ];
+
+    function initializeSupabaseFromStorage() {
+      const url = localStorage.getItem('synapse_supabase_url');
+      const key = localStorage.getItem('synapse_supabase_key');
+
+      if (url && key && window.supabase) {
+        try {
+          supabaseClient = window.supabase.createClient(url, key);
+          updateSyncBadge(true);
+        } catch (err) {
+          console.error("Failed to initialize Supabase:", err);
+          supabaseClient = null;
+          updateSyncBadge(false);
+        }
+      } else {
+        supabaseClient = null;
+        updateSyncBadge(false);
+      }
+    }
+
+    function updateSyncBadge(isCloud) {
+      const badge = document.getElementById('sync-badge');
+      if (isCloud) {
+        badge.className = "text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+        badge.innerText = "Cloud Synced";
+      } else {
+        badge.className = "text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20";
+        badge.innerText = "Local Mode";
+      }
+    }
+
+    async function loadCards() {
+      if (supabaseClient) {
+        try {
+          const { data, error } = await supabaseClient
+            .from('cards')
+            .select('*')
+            .order('created_at', { ascending: true });
+
+          if (error) throw error;
+          cards = data || [];
+          localStorage.setItem('synapse_cached_cards', JSON.stringify(cards));
+          showToast("Cards loaded from cloud.", "info");
+        } catch (err) {
+          console.warn("Could not fetch from Supabase, falling back to cache:", err);
+          showToast("Using cached cards (offline)", "warning");
+          loadLocalCards();
+        }
+      } else {
+        loadLocalCards();
+      }
+      refreshUI();
+    }
+
+    function loadLocalCards() {
+      const stored = localStorage.getItem('synapse_cached_cards');
+      if (stored) {
+        try {
+          cards = JSON.parse(stored);
+        } catch (e) {
+          cards = [...DEFAULT_SEED_CARDS];
+        }
+      } else {
+        cards = [...DEFAULT_SEED_CARDS];
+        saveLocalCards();
+      }
+    }
+
+    function saveLocalCards() {
+      localStorage.setItem('synapse_cached_cards', JSON.stringify(cards));
+    }
+
+    async function syncCardsWithDatabase(userTriggered = false) {
+      const icon = document.getElementById('sync-icon');
+      if (icon) icon.classList.add('animate-spin');
+
+      if (supabaseClient) {
+        await loadCards();
+        if (userTriggered) showToast("Database synchronization complete", "success");
+      } else {
+        refreshUI();
+        if (userTriggered) showToast("Refreshed in Local Mode", "info");
+      }
+
+      if (icon) {
+        setTimeout(() => icon.classList.remove('animate-spin'), 600);
+      }
+    }
+
+    function getDueCards() {
+      const now = new Date();
+      return cards.filter(c => {
+        if (!c.next_review_at) return true;
+        const dueDate = new Date(c.next_review_at);
+        return dueDate <= now;
+      }).sort((a, b) => new Date(a.next_review_at || 0) - new Date(b.next_review_at || 0));
+    }
+
+    function getFutureCards() {
+      const now = new Date();
+      return cards.filter(c => {
+        if (!c.next_review_at) return false;
+        return new Date(c.next_review_at) > now;
+      }).sort((a, b) => new Date(a.next_review_at) - new Date(b.next_review_at));
+    }
+
+    /**
+     * Standard SM-2 algorithm implementation
+     * Grade 1: Again (Interval resets to 10m, streak resets)
+     * Grade 2: Hard (Interval * 1.2, Ease factor drops)
+     * Grade 3: Good (SM-2 standard progression)
+     * Grade 4: Easy (Interval * Ease * 1.3, Ease factor increases)
+     */
+    function calculateSM2(card, grade) {
+      let interval = card.interval_days || 1.0;
+      let ease = card.ease_factor || 2.5;
+      let reps = card.repetitions || 0;
+      const now = new Date();
+
+      if (grade === 1) {
+        // Again / Failure
+        reps = 0;
+        interval = 0.007; // ~10 minutes expressed in days
+      } else if (grade === 2) {
+        // Hard
+        reps = reps + 1;
+        interval = Math.max(1, interval * 1.2);
+        ease = Math.max(1.3, ease - 0.15);
+      } else if (grade === 3) {
+        // Good
+        if (reps === 0) {
+          interval = 1.0;
+        } else if (reps === 1) {
+          interval = 6.0;
+        } else {
+          interval = Math.round(interval * ease);
+        }
+        reps = reps + 1;
+      } else if (grade === 4) {
+        // Easy
+        if (reps === 0) {
+          interval = 4.0;
+        } else if (reps === 1) {
+          interval = 10.0;
+        } else {
+          interval = Math.round(interval * ease * 1.3);
+        }
+        reps = reps + 1;
+        ease = ease + 0.15;
+      }
+
+      // Calculate next review timestamp relative to real-time clock
+      const nextReviewDate = new Date(now.getTime() + Math.round(interval * 24 * 60 * 60 * 1000));
+
+      return {
+        interval_days: parseFloat(interval.toFixed(3)),
+        ease_factor: parseFloat(ease.toFixed(2)),
+        repetitions: reps,
+        last_reviewed_at: now.toISOString(),
+        next_review_at: nextReviewDate.toISOString()
+      };
+    }
+
+    async function handleRateCard(grade) {
+      const due = getDueCards();
+      if (!due.length || currentDueIndex >= due.length) return;
+
+      const currentCard = due[currentDueIndex];
+      const updates = calculateSM2(currentCard, grade);
+
+      // Optimistic update locally
+      const cardIdx = cards.findIndex(c => c.id === currentCard.id);
+      if (cardIdx !== -1) {
+        cards[cardIdx] = { ...cards[cardIdx], ...updates };
+        saveLocalCards();
+      }
+
+      // Synchronize with Supabase if active
+      if (supabaseClient) {
+        try {
+          const { error } = await supabaseClient
+            .from('cards')
+            .update(updates)
+            .eq('id', currentCard.id);
+
+          if (error) throw error;
+        } catch (err) {
+          console.error("Supabase update error:", err);
+          showToast("Failed cloud sync. Saved locally.", "warning");
+        }
+      }
+
+      // Flip card back to front face and advance to next due card
+      setCardFlipped(false);
+
+      // Re-evaluate queue
+      setTimeout(() => {
+        refreshUI();
+      }, 250);
+    }
+
+    function toggleCardFlip() {
+      setCardFlipped(!isFlipped);
+    }
+
+    function setCardFlipped(flipped) {
+      isFlipped = flipped;
+      const inner = document.getElementById('flashcard-inner');
+      const btnReveal = document.getElementById('btn-reveal');
+      const ratingControls = document.getElementById('rating-controls');
+
+      if (isFlipped) {
+        inner.classList.add('rotate-y-180');
+        btnReveal.classList.add('hidden');
+        ratingControls.classList.remove('hidden');
+      } else {
+        inner.classList.remove('rotate-y-180');
+        btnReveal.classList.remove('hidden');
+        ratingControls.classList.add('hidden');
+      }
+    }
+
+    function refreshUI() {
+      const dueCards = getDueCards();
+      const futureCards = getFutureCards();
+
+      // Update Header stats
+      document.getElementById('due-count').innerText = dueCards.length;
+      document.getElementById('total-count').innerText = cards.length;
+      document.getElementById('review-subtitle').innerText = `${dueCards.length} ready to review • ${cards.length} total`;
+
+      const cardWrapper = document.getElementById('flashcard-wrapper');
+      const caughtUpScreen = document.getElementById('caught-up-screen');
+      const controlsContainer = document.getElementById('controls-container');
+      const deckCountdown = document.getElementById('deck-countdown');
+
+      if (dueCards.length === 0) {
+        // All caught up
+        cardWrapper.classList.add('hidden');
+        controlsContainer.classList.add('hidden');
+        caughtUpScreen.classList.remove('hidden');
+        caughtUpScreen.classList.add('flex');
+
+        if (futureCards.length > 0) {
+          const nextCard = futureCards[0];
+          const diffMs = new Date(nextCard.next_review_at) - new Date();
+          deckCountdown.innerText = `Next in ${formatDuration(diffMs)}`;
+          document.getElementById('next-due-relative').innerText = `Due in ${formatDuration(diffMs)}`;
+          document.getElementById('next-due-exact').innerText = new Date(nextCard.next_review_at).toLocaleString();
+        } else {
+          deckCountdown.innerText = "Deck clear";
+          document.getElementById('next-due-relative').innerText = "No future cards scheduled";
+          document.getElementById('next-due-exact').innerText = "Add more cards to keep studying";
+        }
+      } else {
+        // Active review state
+        caughtUpScreen.classList.add('hidden');
+        caughtUpScreen.classList.remove('flex');
+        cardWrapper.classList.remove('hidden');
+        controlsContainer.classList.remove('hidden');
+
+        deckCountdown.innerText = `${dueCards.length} cards remaining now`;
+
+        if (currentDueIndex >= dueCards.length) {
+          currentDueIndex = 0;
+        }
+
+        const currentCard = dueCards[currentDueIndex];
+        document.getElementById('card-front-text').innerText = currentCard.front || "(Empty Prompt)";
+        document.getElementById('card-back-text').innerText = currentCard.back || "(Empty Answer)";
+        document.getElementById('card-front-mini').innerText = currentCard.front;
+        document.getElementById('card-meta-front').innerText = `Rep: ${currentCard.repetitions || 0} • Int: ${formatDays(currentCard.interval_days)}`;
+        document.getElementById('card-meta-back').innerText = `Ease: ${(currentCard.ease_factor || 2.5).toFixed(2)}`;
+
+        // Dynamic previews for next intervals
+        updateIntervalPreviews(currentCard);
+      }
+
+      // Also refresh the card library list
+      renderDeckLibrary();
+      lucide.createIcons();
+    }
+
+    function updateIntervalPreviews(card) {
+      const sm2Hard = calculateSM2(card, 2);
+      const sm2Good = calculateSM2(card, 3);
+      const sm2Easy = calculateSM2(card, 4);
+
+      document.getElementById('rate-hard-preview').innerText = formatDays(sm2Hard.interval_days);
+      document.getElementById('rate-good-preview').innerText = formatDays(sm2Good.interval_days);
+      document.getElementById('rate-easy-preview').innerText = formatDays(sm2Easy.interval_days);
+    }
+
+    function formatDays(days) {
+      if (!days || days < 0.04) return "< 1h";
+      if (days < 1) return `${Math.round(days * 24)}h`;
+      if (days < 30) return `${Math.round(days)}d`;
+      return `${(days / 30).toFixed(1)}mo`;
+    }
+
+    function formatDuration(ms) {
+      if (ms <= 0) return "now";
+      const minutes = Math.floor(ms / (1000 * 60));
+      if (minutes < 60) return `${minutes}m`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h ${minutes % 60}m`;
+      const days = Math.floor(hours / 24);
+      return `${days}d ${hours % 24}h`;
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      const viewStudy = document.getElementById('view-study');
+      const viewCards = document.getElementById('view-cards');
+      const btnStudy = document.getElementById('nav-btn-study');
+      const btnCards = document.getElementById('nav-btn-cards');
+
+      if (tab === 'study') {
+        viewStudy.classList.remove('hidden');
+        viewCards.classList.add('hidden');
+        btnStudy.className = "flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-xs transition bg-indigo-600/15 text-indigo-400 border border-indigo-500/30";
+        btnCards.className = "flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-xs transition text-slate-400 hover:text-white hover:bg-slate-800/40";
+        refreshUI();
+      } else {
+        viewStudy.classList.add('hidden');
+        viewCards.classList.remove('hidden');
+        btnCards.className = "flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-xs transition bg-indigo-600/15 text-indigo-400 border border-indigo-500/30";
+        btnStudy.className = "flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-xs transition text-slate-400 hover:text-white hover:bg-slate-800/40";
+        renderDeckLibrary();
+      }
+      lucide.createIcons();
+    }
+
+    function renderDeckLibrary() {
+      const container = document.getElementById('cards-list-container');
+      const searchTerm = (document.getElementById('card-search-input')?.value || '').toLowerCase();
+      
+      const filtered = cards.filter(c => 
+        (c.front || '').toLowerCase().includes(searchTerm) || 
+        (c.back || '').toLowerCase().includes(searchTerm)
+      );
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-12 text-slate-500">
+            <i data-lucide="layers-slash" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+            <p class="text-sm">No cards match your filter or deck is empty.</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      const now = new Date();
+      container.innerHTML = filtered.map(card => {
+        const isDue = !card.next_review_at || new Date(card.next_review_at) <= now;
+        const dueText = isDue ? 'Due for review' : `Due in ${formatDuration(new Date(card.next_review_at) - now)}`;
+
+        return `
+          <div class="bg-[#121929] border border-slate-800/80 hover:border-slate-700 rounded-xl p-3.5 flex flex-col gap-2 transition">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-semibold text-slate-100 truncate">${escapeHtml(card.front)}</div>
+                <div class="text-xs text-slate-400 line-clamp-2 mt-0.5">${escapeHtml(card.back)}</div>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                <button onclick="editCard('${card.id}')" title="Edit Card" class="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition">
+                  <i data-lucide="edit-3" class="w-4 h-4"></i>
+                </button>
+                <button onclick="resetCardProgress('${card.id}')" title="Reset Progress" class="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition">
+                  <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                </button>
+                <button onclick="deleteCard('${card.id}')" title="Delete Card" class="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition">
+                  <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between text-[11px] pt-2 border-t border-slate-800/60 text-slate-400">
+              <div class="flex items-center gap-2">
+                <span class="${isDue ? 'text-emerald-400 font-semibold' : 'text-slate-400'} flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full ${isDue ? 'bg-emerald-400' : 'bg-slate-500'}"></span>
+                  ${dueText}
+                </span>
+              </div>
+              <div class="flex items-center gap-3">
+                <span>Reps: <b>${card.repetitions || 0}</b></span>
+                <span>Ease: <b>${(card.ease_factor || 2.5).toFixed(2)}</b></span>
+                <span>Gap: <b>${formatDays(card.interval_days)}</b></span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      lucide.createIcons();
+    }
+
+    function filterCardsList() {
+      renderDeckLibrary();
+    }
+
+    function openCardModal(cardToEdit = null) {
+      const modal = document.getElementById('card-modal');
+      const title = document.getElementById('modal-card-title');
+      const formId = document.getElementById('form-card-id');
+      const formFront = document.getElementById('form-front');
+      const formBack = document.getElementById('form-back');
+
+      if (cardToEdit) {
+        title.innerText = "Edit Flashcard";
+        formId.value = cardToEdit.id;
+        formFront.value = cardToEdit.front;
+        formBack.value = cardToEdit.back;
+      } else {
+        title.innerText = "New Flashcard";
+        formId.value = "";
+        formFront.value = "";
+        formBack.value = "";
+      }
+
+      modal.classList.remove('hidden');
+      formFront.focus();
+    }
+
+    function closeCardModal() {
+      document.getElementById('card-modal').classList.add('hidden');
+    }
+
+    function editCard(id) {
+      const c = cards.find(item => item.id === id);
+      if (c) openCardModal(c);
+    }
+
+    async function saveCardFromModal() {
+      const id = document.getElementById('form-card-id').value;
+      const front = document.getElementById('form-front').value.trim();
+      const back = document.getElementById('form-back').value.trim();
+
+      if (!front || !back) {
+        showToast("Both Front and Back text are required.", "warning");
+        return;
+      }
+
+      if (id) {
+        // Update existing
+        const idx = cards.findIndex(c => c.id === id);
+        if (idx !== -1) {
+          cards[idx].front = front;
+          cards[idx].back = back;
+        }
+
+        if (supabaseClient) {
+          try {
+            const { error } = await supabaseClient
+              .from('cards')
+              .update({ front, back })
+              .eq('id', id);
+            if (error) throw error;
+            showToast("Card updated in Supabase cloud", "success");
+          } catch (err) {
+            console.error("Cloud update error:", err);
+            showToast("Saved locally (Cloud update failed)", "warning");
+          }
+        } else {
+          showToast("Card updated locally", "success");
+        }
+      } else {
+        // Create new
+        const newCard = {
+          id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'card-' + Date.now(),
+          front,
+          back,
+          interval_days: 1.0,
+          ease_factor: 2.5,
+          repetitions: 0,
+          last_reviewed_at: null,
+          next_review_at: new Date().toISOString() // immediately ready to study
+        };
+
+        if (supabaseClient) {
+          try {
+            const { data, error } = await supabaseClient
+              .from('cards')
+              .insert([newCard])
+              .select();
+            if (error) throw error;
+            if (data && data[0]) {
+              cards.push(data[0]);
+            } else {
+              cards.push(newCard);
+            }
+            showToast("New card synced to Supabase", "success");
+          } catch (err) {
+            console.error("Cloud insert error:", err);
+            cards.push(newCard);
+            showToast("Saved locally (Cloud sync failed)", "warning");
+          }
+        } else {
+          cards.push(newCard);
+          showToast("New card saved to local storage", "success");
+        }
+      }
+
+      saveLocalCards();
+      closeCardModal();
+      refreshUI();
+    }
+
+    async function deleteCard(id) {
+      cards = cards.filter(c => c.id !== id);
+      saveLocalCards();
+
+      if (supabaseClient) {
+        try {
+          const { error } = await supabaseClient.from('cards').delete().eq('id', id);
+          if (error) throw error;
+          showToast("Card deleted from cloud", "info");
+        } catch (err) {
+          console.error("Cloud delete error:", err);
+          showToast("Deleted locally", "info");
+        }
+      } else {
+        showToast("Card deleted", "info");
+      }
+
+      refreshUI();
+    }
+
+    async function resetCardProgress(id) {
+      const idx = cards.findIndex(c => c.id === id);
+      if (idx === -1) return;
+
+      const resetData = {
+        interval_days: 1.0,
+        ease_factor: 2.5,
+        repetitions: 0,
+        last_reviewed_at: null,
+        next_review_at: new Date().toISOString()
+      };
+
+      cards[idx] = { ...cards[idx], ...resetData };
+      saveLocalCards();
+
+      if (supabaseClient) {
+        try {
+          await supabaseClient.from('cards').update(resetData).eq('id', id);
+          showToast("Card progress reset in cloud", "info");
+        } catch (e) {
+          showToast("Card progress reset locally", "info");
+        }
+      } else {
+        showToast("Card progress reset locally", "info");
+      }
+
+      refreshUI();
+    }
+
+    function openConfigModal() {
+      document.getElementById('supabase-url').value = localStorage.getItem('synapse_supabase_url') || '';
+      document.getElementById('supabase-key').value = localStorage.getItem('synapse_supabase_key') || '';
+      document.getElementById('config-modal').classList.remove('hidden');
+    }
+
+    function closeConfigModal() {
+      document.getElementById('config-modal').classList.add('hidden');
+    }
+
+    async function saveSupabaseConfig() {
+      const url = document.getElementById('supabase-url').value.trim();
+      const key = document.getElementById('supabase-key').value.trim();
+
+      if (!url || !key) {
+        disconnectSupabase();
+        return;
+      }
+
+      localStorage.setItem('synapse_supabase_url', url);
+      localStorage.setItem('synapse_supabase_key', key);
+
+      initializeSupabaseFromStorage();
+      closeConfigModal();
+
+      showToast("Connecting to Supabase...", "info");
+      await syncCardsWithDatabase(true);
+    }
+
+    function disconnectSupabase() {
+      localStorage.removeItem('synapse_supabase_url');
+      localStorage.removeItem('synapse_supabase_key');
+      supabaseClient = null;
+      updateSyncBadge(false);
+      closeConfigModal();
+      showToast("Operating in LocalStorage Mode", "info");
+      refreshUI();
+    }
+
+    function openSqlModal() {
+      document.getElementById('sql-modal').classList.remove('hidden');
+    }
+
+    function closeSqlModal() {
+      document.getElementById('sql-modal').classList.add('hidden');
+    }
+
+    function copySqlSchema() {
+      const sqlText = document.getElementById('sql-code').innerText;
+      copyToClipboard(sqlText);
+      showToast("SQL snippet copied to clipboard!", "success");
+    }
+
+    function copyToClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+      } else {
+        fallbackCopy(text);
+      }
+    }
+
+    function fallbackCopy(text) {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {
+        console.error("Copy failed", err);
+      }
+      document.body.removeChild(textArea);
+    }
+
+    function showToast(message, type = "info") {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      
+      const colors = {
+        success: 'border-emerald-500/40 bg-[#0d221c] text-emerald-300',
+        warning: 'border-amber-500/40 bg-[#291f0c] text-amber-300',
+        info: 'border-indigo-500/40 bg-[#121929] text-indigo-200'
+      };
+
+      toast.className = `border px-3.5 py-2.5 rounded-xl text-xs font-medium shadow-xl flex items-center justify-between gap-3 transform transition-all duration-300 pointer-events-auto opacity-0 translate-y-2 ${colors[type] || colors.info}`;
+      toast.innerHTML = `
+        <span>${escapeHtml(message)}</span>
+        <button onclick="this.parentElement.remove()" class="opacity-70 hover:opacity-100">&times;</button>
+      `;
+
+      container.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.classList.remove('opacity-0', 'translate-y-2');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    window.addEventListener('keydown', (e) => {
+      // Ignore if user is currently typing in an input or textarea
+      if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+      // Space: Flip card
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (activeTab === 'study' && getDueCards().length > 0) {
+          toggleCardFlip();
+        }
+      }
+
+      // Keys 1, 2, 3, 4: Rate card only when flipped to answer
+      if (isFlipped && activeTab === 'study') {
+        if (e.key === '1') handleRateCard(1);
+        if (e.key === '2') handleRateCard(2);
+        if (e.key === '3') handleRateCard(3);
+        if (e.key === '4') handleRateCard(4);
+      }
+    });
+
+    // Check due items every 30 seconds to keep server time sync precise
+    setInterval(() => {
+      if (activeTab === 'study') {
+        refreshUI();
+      }
+    }, 30000);
+
+    // Initial boot sequence
+    window.addEventListener('DOMContentLoaded', () => {
+      initializeSupabaseFromStorage();
+      loadCards();
+      lucide.createIcons();
+    });
+  </script>
+</body>
+</html>
